@@ -390,6 +390,9 @@ $auto_open_edit_modal_id = isset($_GET['edit_attempt']) ? (int)$_GET['edit_attem
                                     <button class="btn btn-sm btn-outline-secondary flex-fill mx-1" onclick="openPasswordModal(<?php echo $teacher_item['id']; ?>, '<?php echo htmlspecialchars(addslashes($teacher_item['full_name'])); ?>', '<?php echo htmlspecialchars(!empty($teacher_item['photo']) ? $teacher_item['photo'] : 'https://ui-avatars.com/api/?name='.urlencode($teacher_item['full_name']).'&background=random&color=fff&size=50'); ?>')">
                                         <i class="fas fa-key"></i> <span class="d-none d-md-inline">Pwd</span>
                                     </button>
+                                    <a href="teacher_details.php?id=<?php echo $teacher_item['id']; ?>" class="btn btn-sm btn-outline-info flex-fill mx-1" title="View Details">
+                                        <i class="fas fa-eye"></i> <span class="d-none d-md-inline">Details</span>
+                                    </a>
                                     <button class="btn btn-sm btn-outline-danger flex-fill ms-1" onclick="confirmDeleteDialog(<?php echo $teacher_item['id']; ?>, '<?php echo htmlspecialchars(addslashes($teacher_item['full_name'])); ?>')">
                                         <i class="fas fa-trash"></i> <span class="d-none d-md-inline">Del</span>
                                     </button>
@@ -736,20 +739,25 @@ $auto_open_edit_modal_id = isset($_GET['edit_attempt']) ? (int)$_GET['edit_attem
             document.getElementById('noTeachersFoundMessage').style.display = visibleCount === 0 && searchTerm !== '' ? 'block' : 'none';
         });
 
-        document.addEventListener('DOMContentLoaded', function() {
-            const uniqueSubjects = new Set();
-            document.querySelectorAll('#teachersDisplayGrid .teacher-card .badge').forEach(badge => {
-                const subjectText = badge.textContent.trim();
-                if (subjectText && subjectText !== 'N/A') uniqueSubjects.add(subjectText);
-            });
-            document.getElementById('subjectsOfferedStat').textContent = uniqueSubjects.size;
-            
-            const distinctRoles = new Set();
-            <?php foreach($teachers_display_list as $t_item): if(!empty($t_item['role'])): ?>
-                distinctRoles.add('<?php echo htmlspecialchars(addslashes($t_item['role'])); ?>');
-            <?php endif; endforeach; ?>
-            document.getElementById('activeRolesStat').textContent = distinctRoles.size;
-        });
+document.addEventListener('DOMContentLoaded', function() {
+    const uniqueSubjects = new Set();
+    document.querySelectorAll('#teachersDisplayGrid .teacher-card .badge').forEach(badge => {
+        if (badge.textContent.trim() !== 'N/A') {
+            uniqueSubjects.add(badge.textContent.trim());
+        }
+    });
+    document.getElementById('subjectsOfferedStat').textContent = uniqueSubjects.size;
+
+    const uniqueRoles = new Set();
+    document.querySelectorAll('#teachersDisplayGrid .teacher-card-item').forEach(card => {
+        const role = card.querySelector('.teacher-info span:last-child')?.textContent.trim();
+        if (role) uniqueRoles.add(role);
+    });
+    document.getElementById('activeRolesStat').textContent = uniqueRoles.size;
+});
+
+window.prepareEditModal = prepareEditModal;
+window.openPasswordModal = openPasswordModal;
     </script>
 </body>
 </html>

@@ -86,7 +86,7 @@ if (!isset($_SESSION['user_id'])) {
             <li class="bottom-item">
                 <a href="logout.php" class="logout-link">
                     <i class="fas fa-sign-out-alt"></i>
-                    <span>Logout</span>
+                    <span class="sidebar-text">Logout</span>
                 </a>
             </li>
         </ul>

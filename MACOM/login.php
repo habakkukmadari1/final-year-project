@@ -1,356 +1,369 @@
 <?php
-// Enable error reporting for debugging
+// login.php
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-// Start session only if not already started
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-include 'db_config.php';
-include 'auth.php';
+require_once 'db_config.php';
+require_once 'auth.php';
 
-// Process login if form submitted
+$login_error_message = $_SESSION['login_error_message'] ?? null;
+$login_success_message = $_SESSION['login_success_message'] ?? null;
+if ($login_error_message) unset($_SESSION['login_error_message']);
+if ($login_success_message) unset($_SESSION['login_success_message']);
+
+if (isset($_SESSION['user_id']) && isset($_SESSION['role'])) {
+    $dashboard_map = [
+        'head_teacher' => 'head_teacher_dashboard.php',
+        'secretary' => 'secretary_dashboard.php',
+        'director_of_studies' => 'director_dashboard.php',
+        'IT' => 'IT_dashboard.php',
+        'student' => 'student_dashboard.php',
+        'teacher' => 'teachers/teacher_dashboard.php',
+    ];
+    $redirect_url = $dashboard_map[$_SESSION['role']] ?? 'login.php';
+    if (basename($_SERVER['PHP_SELF']) !== $redirect_url || $redirect_url !== 'login.php') {
+        header("Location: " . $redirect_url);
+        exit();
+    }
+}
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $username = trim($_POST['username']);
-    $password = trim($_POST['password']);
+    $username_input = trim($_POST['username']); // Use a different variable name to avoid confusion with table columns
+    $password_input = trim($_POST['password']);
+    $user_found_but_password_incorrect = false;
+    $account_found_in_any_table = false; // New flag
 
-    // Debug: Check if form data is received
-    error_log("Login attempt - Username: $username, Password: $password");
-
-    // Check in the users table first
-    $user_query = $conn->prepare("SELECT * FROM users WHERE username = ?");
-    if (!$user_query) {
-        error_log("Prepare failed: " . $conn->error);
-        $login_error = "Database error. Please try again later.";
+    if (empty($username_input) || empty($password_input)) {
+        $login_error_message = "Username/Email and password are required.";
     } else {
-        $user_query->bind_param("s", $username);
-        $executed = $user_query->execute();
-        
-        if (!$executed) {
-            error_log("Execute failed: " . $user_query->error);
-            $login_error = "Database error. Please try again later.";
-        } else {
-            $user_result = $user_query->get_result();
-            
-            if ($user_result->num_rows > 0) {
-                $user = $user_result->fetch_assoc();
-                
-                // Debug: Check what user data was retrieved
-                error_log("User found: " . print_r($user, true));
-                
-                // Check hashed password
-                if (password_verify($password, $user['password'])) {
-                    $_SESSION['user_id'] = $user['username']; // Using username as ID since no ID column
+        $login_successful = false;
+
+        // Attempt 1: Check 'users' table
+        // CAREFULLY CHECK THESE COLUMN NAMES AGAINST YOUR ACTUAL `users` TABLE
+        $sql_users = "SELECT username, password, role, full_name, profile_pic FROM users WHERE username = ?";
+        $stmt_user = $conn->prepare($sql_users);
+
+        if ($stmt_user) {
+            $stmt_user->bind_param("s", $username_input);
+            $stmt_user->execute();
+            $result_user = $stmt_user->get_result();
+
+            if ($result_user->num_rows > 0) {
+                $account_found_in_any_table = true; // Account exists in users table
+                $user = $result_user->fetch_assoc();
+                if (password_verify($password_input, $user['password'])) {
+                    $_SESSION['user_id'] = $user['username']; // Consider using a numerical ID if 'users' table has one
                     $_SESSION['username'] = $user['username'];
-                    $_SESSION['full_name'] = $user['username']; // Using username as name
+                    $_SESSION['full_name'] = $user['full_name'] ?? $user['username'];
                     $_SESSION['role'] = $user['role'];
-                    
-                    // Debug: Check session variables
-                    error_log("Session set: " . print_r($_SESSION, true));
-                    
-                    // Success message
-                    $_SESSION['success'] = "Login successful! Welcome back, " . $user['username'];
-                    
-                    // Redirect based on role
-                    $dashboard_map = [
-                        'head_teacher' => 'head_teacher_dashboard.php',
-                        'secretary' => 'secretary_dashboard.php',
-                        'director_of_studies' => 'director_dashboard.php',
-                        'IT' => 'IT_dashboard.php',
-                        'student' => 'student_dashboard.php'
-                    ];
-                    
-                    $redirect = $dashboard_map[$user['role']] ?? 'dashboard.php';
-                    header("Location: $redirect");
-                    exit();
+                    $_SESSION['profile_pic'] = $user['profile_pic'] ?? null;
+                    $login_successful = true;
                 } else {
-                    $login_error = "Invalid password. Please try again.";
-                    error_log("Password mismatch for user: $username");
+                    $user_found_but_password_incorrect = true;
                 }
+            }
+            $stmt_user->close();
+        } else {
+            // This is the critical error point for U1
+            error_log("Login Error (users table prepare) - SQL: $sql_users - Error: " . $conn->error);
+            $login_error_message = "System error during login. Please contact support. (Code: U1)";
+        }
+
+        // Attempt 2: Check 'teachers' table
+        if (!$login_successful && filter_var($username_input, FILTER_VALIDATE_EMAIL)) {
+            $sql_teachers = "SELECT id, full_name, email, password, role, photo FROM teachers WHERE email = ?";
+            $stmt_teacher = $conn->prepare($sql_teachers);
+            if ($stmt_teacher) {
+                $stmt_teacher->bind_param("s", $username_input);
+                $stmt_teacher->execute();
+                $result_teacher = $stmt_teacher->get_result();
+
+                if ($result_teacher->num_rows > 0) {
+                    $account_found_in_any_table = true; // Account exists in teachers table
+                    $teacher = $result_teacher->fetch_assoc();
+                    if (password_verify($password_input, $teacher['password'])) {
+                        $_SESSION['user_id'] = $teacher['id'];
+                        $_SESSION['username'] = $teacher['email'];
+                        $_SESSION['full_name'] = $teacher['full_name'];
+                        $_SESSION['role'] = $teacher['role'] ?: 'teacher';
+                        $_SESSION['profile_pic'] = $teacher['photo'] ?? null;
+                        $login_successful = true;
+                    } else {
+                        $user_found_but_password_incorrect = true;
+                    }
+                }
+                $stmt_teacher->close();
             } else {
-                $login_error = "No account found with that username.";
-                error_log("No user found with username: $username");
+                error_log("Login Error (teachers table prepare) - SQL: $sql_teachers - Error: " . $conn->error);
+                if (!$login_error_message) $login_error_message = "System error during login. Please contact support. (Code: T1)";
+            }
+        }
+        
+        // Student Login (Placeholder)
+        /* ... */
+
+        // Process Login Result
+        if ($login_successful && isset($_SESSION['role'])) {
+            $_SESSION['login_success_message'] = "Login successful! Welcome back, " . htmlspecialchars($_SESSION['full_name']) . ".";
+            $dashboard_map = [
+                'head_teacher' => 'head_teacher_dashboard.php',
+                'secretary' => 'secretary_dashboard.php',
+                'director_of_studies' => 'director_dashboard.php',
+                'IT' => 'IT_dashboard.php',
+                'student' => 'student_dashboard.php',
+                'teacher' => 'teachers/teacher_dashboard.php',
+            ];
+            $redirect_url = $dashboard_map[$_SESSION['role']] ?? 'login.php?error=unknown_role';
+            if (isset($_SESSION['login_error_message'])) unset($_SESSION['login_error_message']);
+            header("Location: " . $redirect_url);
+            exit();
+        } else {
+            if (!$login_error_message) { // If no system error occurred
+                if ($user_found_but_password_incorrect) {
+                    $login_error_message = "Incorrect password. Please try again.";
+                } elseif ($account_found_in_any_table) {
+                     // This case should ideally not be hit if $user_found_but_password_incorrect is true
+                     // But as a fallback if an account was found but didn't match password for some reason
+                    $login_error_message = "Password verification failed. Please try again.";
+                }
+                 else {
+                    $login_error_message = "Account not found with the provided username or email.";
+                }
             }
         }
     }
 }
-
-// If user is already logged in, redirect them
-if (isset($_SESSION['user_id'])) {
-    check_login();
-}
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - MACOM School Management System</title>
-    <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Font Awesome -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
-            --primary-color: #2563eb;
-            --primary-light: #60a5fa;
-            --primary-dark: #1d4ed8;
-            --accent-color: #ef4444;
-            --text-primary: #1e293b;
-            --text-secondary: #64748b;
-            --bg-primary: #ffffff;
-            --bg-secondary: #f1f5f9;
+            --primary-color: #2563eb; --primary-light: #60a5fa; --primary-dark: #1d4ed8;
+            --accent-color: #ef4444; --success-color: #10b981;
+            --text-primary: #1e293b; --text-secondary: #64748b;
+            --bg-primary: #ffffff; --bg-secondary: #f1f5f9;
+            --input-border-color: #cbd5e1; /* Slate 300 */
+            --input-focus-border-color: var(--primary-light);
+            --input-bg-color: var(--bg-primary);
+            --input-text-color: var(--text-primary);
+            --input-placeholder-color: var(--text-secondary);
         }
-
+        html[data-bs-theme="dark"] {
+            --primary-color: #3b82f6; --primary-light: #2563eb; --primary-dark: #93c5fd;
+            --accent-color: #f87171; --success-color: #34d399;
+            --text-primary: #f1f5f9; --text-secondary: #94a3b8;
+            --bg-primary: #1e293b; --bg-secondary: #0f172a;
+            --input-border-color: #475569; /* Slate 600 */
+            --input-focus-border-color: var(--primary-light);
+            --input-bg-color: #334155; /* Slate 700 for a slightly lighter input bg in dark mode */
+            --input-text-color: var(--text-primary);
+            --input-placeholder-color: var(--text-secondary);
+        }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--bg-secondary);
-            color: var(--text-primary);
-            height: 100vh;
-            display: flex;
-            align-items: center;
+            background-color: var(--bg-secondary); color: var(--text-primary);
+            min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem;
         }
-
+        .login-container-wrapper { max-width: 1000px; width: 100%; }
         .login-container {
-            display: flex;
-            max-width: 1200px;
-            margin: 0 auto;
-            background-color: var(--bg-primary);
-            border-radius: 15px;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            display: flex; background-color: var(--bg-primary); border-radius: 1rem;
+            overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
         }
-
         .welcome-section {
-            flex: 1;
-            background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
-            color: white;
-            padding: 60px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
+            flex: 1.2; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: white;
+            padding: 3rem; display: flex; flex-direction: column; justify-content: center;
         }
-
-        .login-section {
-            flex: 1;
-            padding: 60px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }
-
-        .school-logo {
-            width: 80px;
-            margin-bottom: 20px;
-        }
-
-        .welcome-title {
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin-bottom: 20px;
-        }
-
-        .welcome-subtitle {
-            font-size: 1.1rem;
-            opacity: 0.9;
-            margin-bottom: 30px;
-        }
-
-        .value-item {
-            display: flex;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-
+        .login-section { flex: 1; padding: 3rem; display: flex; flex-direction: column; justify-content: center; }
+        .school-logo { width: 70px; margin-bottom: 1.5rem; }
+        .welcome-title { font-size: 2.25rem; font-weight: 700; margin-bottom: 1rem; }
+        .welcome-subtitle { font-size: 1rem; opacity: 0.9; margin-bottom: 2rem; }
+        .value-item { display: flex; align-items: flex-start; margin-bottom: 1.25rem; }
         .value-icon {
-            background-color: rgba(255, 255, 255, 0.2);
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.15); width: 36px; height: 36px;
+            border-radius: 0.5rem; display: flex; align-items: center; justify-content: center;
+            margin-right: 1rem; flex-shrink: 0;
+        }
+        .value-item h5 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.25rem; }
+        .value-item p { font-size: 0.85rem; opacity: 0.85; margin-bottom: 0; line-height: 1.5; }
+        .login-title { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--primary-color); }
+        .login-subtitle { color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.9rem; }
+        
+        .form-control { /* Applied to the input field itself */
+            height: calc(1.5em + 1rem + 2px); 
+            border-radius: 0.5rem; 
+            border: 1px solid var(--input-border-color);
+            padding-left: 1rem; 
+            padding-right: 2.5rem; /* Space for the icon button */
+            background-color: var(--input-bg-color); 
+            color: var(--input-text-color); 
+            flex-grow: 1;
+            border-top-right-radius: 0; /* For when used with appended button */
+            border-bottom-right-radius: 0;
+        }
+        .form-control::placeholder { color: var(--input-placeholder-color); }
+        .form-control:focus {
+            border-color: var(--input-focus-border-color);
+            box-shadow: 0 0 0 0.25rem rgba(var(--bs-primary-rgb), 0.25);
+            z-index: 2; /* Ensure focus ring is above button */
+        }
+        .input-group { 
+            margin-bottom: 1.25rem; 
+            position: relative; /* For absolute positioning of button if not using BS input-group */
+        }
+        .input-group .form-control {
+            margin-bottom: 0; /* Reset margin if inside input-group */
+        }
+        .input-group-append-custom { /* Custom styling for the button container */
+            display: flex;
+        }
+        .btn-eye-toggle {
+            height: calc(1.5em + 1rem + 2px);
+            border: 1px solid var(--input-border-color);
+            background-color: var(--input-bg-color);
+            color: var(--text-secondary);
+            border-left: 0;
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+            border-top-right-radius: 0.5rem;
+            border-bottom-right-radius: 0.5rem;
+            padding: 0.5rem 0.75rem;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-right: 15px;
+            cursor: pointer;
+        }
+        .btn-eye-toggle:hover {
+            background-color: var(--bs-tertiary-bg); /* Slight hover effect */
+        }
+        .form-control:focus + .input-group-append-custom .btn-eye-toggle {
+            border-color: var(--input-focus-border-color); /* Match focus border */
+            z-index: 2;
         }
 
-        .login-title {
-            font-size: 2rem;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: var(--primary-color);
-        }
-
-        .login-subtitle {
-            color: var(--text-secondary);
-            margin-bottom: 30px;
-        }
-        /* Success message styling */
-.success-message {
-    color: white;
-    background-color: #10b981;
-    padding: 15px;
-    border-radius: 8px;
-    margin-bottom: 25px;
-    text-align: center;
-    animation: fadeIn 0.3s ease-in-out;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.success-message i {
-    margin-right: 10px;
-    font-size: 1.2rem;
-}
-
-
-
-        .form-control {
-            height: 50px;
-            border-radius: 8px;
-            border: 1px solid #e2e8f0;
-            padding-left: 15px;
-            margin-bottom: 20px;
-        }
-
-        .form-control:focus {
-            border-color: var(--primary-light);
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-        }
 
         .btn-login {
-            background-color: var(--primary-color);
-            color: white;
-            height: 50px;
-            border-radius: 8px;
-            font-weight: 600;
-            border: none;
-            transition: all 0.3s;
+            background-color: var(--primary-color); color: white; height: calc(1.5em + 1rem + 2px);
+            border-radius: 0.5rem; font-weight: 600; border: none;
+            transition: background-color 0.2s ease-in-out, transform 0.1s ease-in-out; width: 100%;
         }
-
-        .btn-login:hover {
-            background-color: var(--primary-dark);
-            transform: translateY(-2px);
+        .btn-login:hover { background-color: var(--primary-dark); transform: translateY(-1px); }
+        .btn-login:active { transform: translateY(0px); }
+        .alert-custom {
+            padding: 0.9rem 1rem; border-radius: 0.5rem; margin-bottom: 1.5rem;
+            display: flex; align-items: center; font-size: 0.9rem; animation: fadeIn 0.3s ease-in-out;
         }
-
-        /* Enhanced error message styling */
-        .error-message {
-            color: white;
-            background-color: var(--accent-color);
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 25px;
-            text-align: center;
-            animation: fadeIn 0.3s ease-in-out;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .error-message i {
-            margin-right: 10px;
-            font-size: 1.2rem;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        @media (max-width: 992px) {
-            .login-container {
-                flex-direction: column;
-                max-width: 500px;
-            }
-            
-            .welcome-section, .login-section {
-                padding: 40px;
-            }
+        .alert-custom i { margin-right: 0.75rem; font-size: 1.1rem; }
+        .alert-danger-custom { background-color: var(--accent-color); color: white; }
+        .alert-success-custom { background-color: var(--success-color); color: white; }
+        .login-footer { margin-top: 1.5rem; font-size: 0.85rem; text-align: center; }
+        .login-footer a { color: var(--primary-color); text-decoration: none; }
+        .login-footer a:hover { text-decoration: underline; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+        @media (max-width: 768px) {
+            .login-container { flex-direction: column; }
+            .welcome-section, .login-section { padding: 2rem; flex-basis: auto; }
+            .welcome-title { font-size: 1.75rem; } .login-title { font-size: 1.5rem; }
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <div class="welcome-section">
-            <img src="https://via.placeholder.com/80x80" alt="School Logo" class="school-logo">
-            <h1 class="welcome-title">Welcome to MACOM</h1>
-            <p class="welcome-subtitle">Majorine College Mulawa School Management System</p>
-            
-            <div class="values-list">
-                <div class="value-item">
-                    <div class="value-icon">
-                        <i class="fas fa-graduation-cap"></i>
-                    </div>
-                    <div>
-                        <h5>Academic Excellence</h5>
-                        <p>Nurturing future leaders through quality education</p>
-                    </div>
-                </div>
-                
-                <div class="value-item">
-                    <div class="value-icon">
-                        <i class="fas fa-hands-helping"></i>
-                    </div>
-                    <div>
-                        <h5>Community Values</h5>
-                        <p>Building strong relationships between students, staff and parents</p>
-                    </div>
-                </div>
-                
-                <div class="value-item">
-                    <div class="value-icon">
-                        <i class="fas fa-lightbulb"></i>
-                    </div>
-                    <div>
-                        <h5>Innovation</h5>
-                        <p>Embracing technology for better learning experiences</p>
-                    </div>
+    <div class="login-container-wrapper">
+        <div class="login-container">
+            <div class="welcome-section">
+                <img src="path/to/your/logo.png" alt="MACOM School Logo" class="school-logo"> <!-- UPDATE YOUR LOGO PATH -->
+                <h1 class="welcome-title">Welcome to MACOM</h1>
+                <p class="welcome-subtitle">Majorine College Mulawa School Management System</p>
+                <div class="values-list">
+                    <div class="value-item"><div class="value-icon"><i class="fas fa-graduation-cap"></i></div><div><h5>Academic Excellence</h5><p>Nurturing future leaders.</p></div></div>
+                    <div class="value-item"><div class="value-icon"><i class="fas fa-users"></i></div><div><h5>Community Values</h5><p>Fostering strong bonds.</p></div></div>
+                    <div class="value-item"><div class="value-icon"><i class="fas fa-lightbulb"></i></div><div><h5>Innovation in Learning</h5><p>Embracing technology.</p></div></div>
                 </div>
             </div>
-        </div>
-        
-        <div class="login-section">
-            <h2 class="login-title">Login to Your Account</h2>
-            <p class="login-subtitle">Enter your credentials to access the system</p>
             
-            <?php if (!empty($login_error)): ?>
-                <div class="error-message">
-                    <i class="fas fa-exclamation-circle"></i>
-                    <?php echo htmlspecialchars($login_error); ?>
+            <div class="login-section">
+                <h2 class="login-title">Sign In</h2>
+                <p class="login-subtitle">Enter your credentials to access your account.</p>
+                
+                <?php if (!empty($login_error_message)): ?>
+                    <div class="alert-custom alert-danger-custom">
+                        <i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($login_error_message); ?>
+                    </div>
+                <?php endif; ?>
+                <?php if (!empty($login_success_message)): ?>
+                    <div class="alert-custom alert-success-custom">
+                        <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($login_success_message); ?>
+                    </div>
+                <?php endif; ?>
+                <?php if (isset($_GET['logged_out'])): ?>
+                    <div class="alert-custom alert-success-custom">
+                        <i class="fas fa-check-circle"></i> You have been successfully logged out.
+                    </div>
+                <?php endif; ?>
+                <?php if (isset($_GET['error']) && $_GET['error'] === 'unauthorized_access_attempt'): ?>
+                    <div class="alert-custom alert-danger-custom">
+                        <i class="fas fa-shield-alt"></i> You attempted to access an unauthorized page.
+                    </div>
+                <?php endif; ?>
+
+                <form method="POST" action="login.php">
+                    <div class="form-group mb-3">
+                        <input type="text" class="form-control" name="username" placeholder="Username or Email" required value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>">
+                    </div>
+                    <div class="input-group mb-3">
+                        <input type="password" class="form-control" id="passwordInput" name="password" placeholder="Password" required>
+                        <button class="btn btn-eye-toggle" type="button" id="togglePasswordBtn" aria-label="Toggle password visibility">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <button type="submit" class="btn btn-login">Login</button>
+                </form>
+                
+                <div class="login-footer">
+                    <a href="#">Forgot password?</a>
+                    <span class="mx-2 text-muted">|</span>
+                    <a href="#">Contact Support</a>
                 </div>
-            <?php endif; ?>
-            
-            <?php if (isset($_SESSION['success'])): ?>
-                <div class="success-message">
-                    <i class="fas fa-check-circle"></i>
-                    <?php echo htmlspecialchars($_SESSION['success']); 
-                    unset($_SESSION['success']); ?>
-                </div>
-            <?php endif; ?>
-            
-            <form method="POST" action="">
-                <div class="form-group">
-                    <input type="text" class="form-control" name="username" placeholder="Username" required>
-                </div>
-                <div class="form-group">
-                    <input type="password" class="form-control" name="password" placeholder="Password" required>
-                </div>
-                <button type="submit" class="btn btn-login btn-block">Login</button>
-            </form>
-            
-            <div class="text-center mt-4">
-                <a href="#" class="text-decoration-none">Forgot password?</a>
-                <span class="mx-2">|</span>
-                <a href="#" class="text-decoration-none">Contact Support</a>
             </div>
         </div>
     </div>
 
-
-    <!-- Bootstrap JS Bundle with Popper -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const togglePasswordBtn = document.getElementById('togglePasswordBtn');
+        const passwordInput = document.getElementById('passwordInput');
+
+        if (togglePasswordBtn && passwordInput) {
+            togglePasswordBtn.addEventListener('click', function () {
+                const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+                passwordInput.setAttribute('type', type);
+                const icon = this.querySelector('i');
+                icon.classList.toggle('fa-eye');
+                icon.classList.toggle('fa-eye-slash');
+            });
+        }
+
+        // Theme toggle (if you want it on the login page, otherwise remove)
+        // function toggleTheme() { 
+        //     const currentTheme = document.documentElement.getAttribute('data-bs-theme') || 'light';
+        //     const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        //     document.documentElement.setAttribute('data-bs-theme', newTheme);
+        //     localStorage.setItem('themePreferenceMACOM', newTheme);
+        // }
+        // document.addEventListener('DOMContentLoaded', () => {
+        //     const savedTheme = localStorage.getItem('themePreferenceMACOM');
+        //     if (savedTheme) document.documentElement.setAttribute('data-bs-theme', savedTheme);
+        // });
+
+    </script>
 </body>
 </html>
