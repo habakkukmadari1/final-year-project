@@ -170,9 +170,9 @@ if ($conn) {
     </style>
 </head>
 <body>
-    <div class="wrapper">
+    <div class="wrapper"  >
         <?php include 'nav&sidebar_teacher.php'; ?>
-        <!-- The <main class="main-content-custom p-3 p-md-4"> tag is now opened by nav&sidebar_teacher.php -->
+       <main class="main-content-custom p-3 p-md-4"> 
         <!-- Content for THIS PAGE (teacher_my_students.php) starts here -->
 
             <div class="page-header-tms d-flex flex-column flex-md-row justify-content-between align-items-md-center">

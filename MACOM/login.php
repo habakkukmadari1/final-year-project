@@ -8,6 +8,17 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 require_once 'db_config.php';
+// --- DEBUGGING DB CONNECTION ---
+if (!$conn) {
+    error_log("DB_CONFIG_ERROR: \$conn object is null or false. Connection likely failed in db_config.php.");
+    die("Critical Database Connection Error in db_config.php. Check PHP error log. (Code: DBCONN_FAIL)");
+}
+if ($conn->connect_error) {
+    error_log("DB_CONNECT_ERROR: Connection failed: " . $conn->connect_error);
+    die("Database Connection Error: " . htmlspecialchars($conn->connect_error) . ". Check credentials in db_config.php. (Code: DBCONN_ERR)");
+}
+// echo "DB Connection seems OK.<br>"; // Remove after testing
+// --- END DEBUGGING ---
 require_once 'auth.php';
 
 $login_error_message = $_SESSION['login_error_message'] ?? null;
@@ -44,7 +55,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         // Attempt 1: Check 'users' table
         // CAREFULLY CHECK THESE COLUMN NAMES AGAINST YOUR ACTUAL `users` TABLE
-        $sql_users = "SELECT username, password, role, full_name, profile_pic FROM users WHERE username = ?";
+        $sql_users = "SELECT username, password, role, profile_pic FROM users WHERE username = ?";
         $stmt_user = $conn->prepare($sql_users);
 
         if ($stmt_user) {
@@ -58,14 +69,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 if (password_verify($password_input, $user['password'])) {
                     $_SESSION['user_id'] = $user['username']; // Consider using a numerical ID if 'users' table has one
                     $_SESSION['username'] = $user['username'];
-                    $_SESSION['full_name'] = $user['full_name'] ?? $user['username'];
+                    $_SESSION['full_name'] = $user['username'] ?? $user['username'];
                     $_SESSION['role'] = $user['role'];
                     $_SESSION['profile_pic'] = $user['profile_pic'] ?? null;
                     $login_successful = true;
                 } else {
                     $user_found_but_password_incorrect = true;
                 }
-            }
             $stmt_user->close();
         } else {
             // This is the critical error point for U1

@@ -110,6 +110,11 @@ if ($error_message_tdash) unset($_SESSION['error_message_tdash']);
                 </div>
             </div>
 
+            <div class="row mt-4">
+                <div class="col-md-6 mb-4"><div class="section-card h-100"><div class="card-header"><h5 class="mb-0"><i class="far fa-calendar-alt me-2 text-success"></i>My Timetable</h5></div><div class="card-body"><p class="text-muted">Feature coming soon.</p></div></div></div>
+                <div class="col-md-6 mb-4"><div class="section-card h-100"><div class="card-header"><h5 class="mb-0"><i class="fas fa-bullhorn me-2 text-info"></i>Notifications</h5></div><div class="card-body"><p class="text-muted">Feature coming soon.</p></div></div></div>
+            </div>
+
             <div class="section-card">
                 <div class="card-header d-flex justify-content-between align-items-center flex-wrap">
                     <h5 class="mb-0 me-2"><i class="fas fa-tasks me-2 text-primary"></i>My Assigned Subject Papers</h5>
@@ -130,10 +135,7 @@ if ($error_message_tdash) unset($_SESSION['error_message_tdash']);
                 <div class="card-body p-0"><div id="teacherAssignedPapersContainer" class="table-responsive"><p class="text-muted text-center p-3">Loading your assignments...</p></div></div>
             </div>
 
-            <div class="row mt-4">
-                <div class="col-md-6 mb-4"><div class="section-card h-100"><div class="card-header"><h5 class="mb-0"><i class="far fa-calendar-alt me-2 text-success"></i>My Timetable</h5></div><div class="card-body"><p class="text-muted">Feature coming soon.</p></div></div></div>
-                <div class="col-md-6 mb-4"><div class="section-card h-100"><div class="card-header"><h5 class="mb-0"><i class="fas fa-bullhorn me-2 text-info"></i>Notifications</h5></div><div class="card-body"><p class="text-muted">Feature coming soon.</p></div></div></div>
-            </div>
+           
         </main>
     <!-- Closing #content and .wrapper are in nav&sidebar_teacher.php -->
 
