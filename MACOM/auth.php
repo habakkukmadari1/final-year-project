@@ -7,6 +7,66 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 /**
+ * Checks if the current academic year has ended and automatically
+ * rolls over to the next sequential year. This should be called
+ * on pages accessed by high-privilege users (HT, DoS).
+ * @param mysqli $conn The database connection object.
+ */
+function check_and_update_academic_year($conn) {
+    if (!$conn) return;
+
+    // Use a session flag to avoid running this on every single page load in one request cycle.
+    if (isset($_SESSION['year_check_done'])) {
+        return;
+    }
+
+    $current_year_sql = "SELECT id, end_date FROM academic_years WHERE is_current = 1 LIMIT 1";
+    $result = $conn->query($current_year_sql);
+
+    if ($result && $result->num_rows > 0) {
+        $current_year = $result->fetch_assoc();
+        $end_date = new DateTime($current_year['end_date']);
+        $today = new DateTime();
+
+        // Check if the current year's end date has passed.
+        if ($end_date < $today) {
+            // Find the next academic year based on start date.
+            $next_year_stmt = $conn->prepare("SELECT id FROM academic_years WHERE start_date > ? ORDER BY start_date ASC LIMIT 1");
+            $next_year_stmt->bind_param("s", $current_year['end_date']);
+            $next_year_stmt->execute();
+            $next_year_result = $next_year_stmt->get_result();
+
+            if ($next_year_result->num_rows > 0) {
+                $next_year = $next_year_result->fetch_assoc();
+                $old_year_id = $current_year['id'];
+                $new_year_id = $next_year['id'];
+
+                // Perform the rollover in a transaction.
+                $conn->begin_transaction();
+                try {
+                    $conn->query("UPDATE academic_years SET is_current = 0 WHERE id = $old_year_id");
+                    $conn->query("UPDATE academic_years SET is_current = 1 WHERE id = $new_year_id");
+                    $conn->commit();
+                    // Optional: Log this system event.
+                    error_log("SYSTEM AUTO-EVENT: Academic year rolled over from ID {$old_year_id} to {$new_year_id}.");
+                } catch (Exception $e) {
+                    $conn->rollback();
+                    error_log("SYSTEM AUTO-EVENT FAILED: Could not roll over academic year. Error: " . $e->getMessage());
+                }
+            }
+            $next_year_stmt->close();
+        }
+    }
+    $_SESSION['year_check_done'] = true;
+}
+
+// *** CALL THE FUNCTION for privileged users ***
+if (isset($_SESSION['role']) && in_array($_SESSION['role'], ['head_teacher', 'director_of_studies'])) {
+    check_and_update_academic_year($conn);
+}
+
+
+/**
  * Checks if a user is logged in. If not, redirects to the login page.
  * Can also check for a specific role or an array of allowed roles.
  *
@@ -46,10 +106,10 @@ function check_login($required_role = null) {
             $dashboard_map = [
                 'head_teacher' => 'head_teacher_dashboard.php',
                 'secretary' => 'secretary_dashboard.php',
-                'director_of_studies' => 'director_dashboard.php',
+                'director_of_studies' => 'Dos/director_dashboard.php',
                 'IT' => 'IT_dashboard.php',
                 'student' => 'student_dashboard.php', // Assuming students have a dashboard
-                'teacher' => 'teacher_dashboard.php',
+                'teacher' => 'teachers/teacher_dashboard.php',
             ];
             $current_user_dashboard = $dashboard_map[$_SESSION['role']] ?? 'login.php'; // Fallback to login if role unknown
 

@@ -83,6 +83,15 @@ if (!isset($_SESSION['user_id'])) {
                     <span>Finance</span>
                 </a>
             </li>
+            // In nav&sidebar.php
+...
+            <li>
+                <a href="history_overview.php" class="history-link">
+                    <i class="fas fa-archive"></i>
+                    <span>History & Archives</span>
+                </a>
+            </li>
+            ...
             <li class="bottom-item">
                 <a href="logout.php" class="logout-link">
                     <i class="fas fa-sign-out-alt"></i>

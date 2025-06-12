@@ -2,6 +2,75 @@
 require_once 'db_config.php'; 
 require_once 'auth.php';
 
+check_login('head_teacher');
+$loggedInUserId = $_SESSION['user_id']; // The HT's ID
+
+// --- AJAX for HT approval/decline ---
+$action = $_POST['action'] ?? null;
+if($action == 'resolve_request' && $conn) {
+    header('Content-Type: application/json');
+    $response = ['success' => false, 'message' => 'An unknown error occurred.'];
+    $request_id = filter_input(INPUT_POST, 'request_id', FILTER_VALIDATE_INT);
+    $resolution = $_POST['resolution'] ?? ''; // 'approve' or 'decline'
+
+    if(!$request_id || !in_array($resolution, ['approve', 'decline'])) {
+        $response['message'] = 'Invalid data provided.';
+        echo json_encode($response); exit;
+    }
+
+    $conn->begin_transaction();
+    try {
+        // First, update the request status
+        $new_status = ($resolution == 'approve') ? 'approved' : 'declined';
+        $stmt_update_req = $conn->prepare("UPDATE system_change_requests SET status=?, resolved_by_user_id=?, resolved_at=NOW() WHERE id=? AND status='pending'");
+        $stmt_update_req->bind_param("sii", $new_status, $loggedInUserId, $request_id);
+        if(!$stmt_update_req->execute() || $stmt_update_req->affected_rows == 0) {
+            throw new Exception("Request could not be updated. It might have been already resolved or cancelled.");
+        }
+        $stmt_update_req->close();
+
+        // If approved, perform the action
+        if($resolution == 'approve') {
+            // Get the target year ID from the request
+            $stmt_get_target = $conn->prepare("SELECT target_id FROM system_change_requests WHERE id = ?");
+            $stmt_get_target->bind_param("i", $request_id);
+            $stmt_get_target->execute();
+            $target_id = $stmt_get_target->get_result()->fetch_assoc()['target_id'];
+            $stmt_get_target->close();
+
+            if(!$target_id) throw new Exception("Could not find the target year for the request.");
+
+            // Set the new year
+            $conn->query("UPDATE academic_years SET is_current = 0");
+            $stmt_set_year = $conn->prepare("UPDATE academic_years SET is_current = 1 WHERE id = ?");
+            $stmt_set_year->bind_param("i", $target_id);
+            $stmt_set_year->execute();
+            $stmt_set_year->close();
+        }
+
+        $conn->commit();
+        $response = ['success' => true, 'message' => "Request has been successfully {$new_status}."];
+
+    } catch (Exception $e) {
+        $conn->rollback();
+        $response['message'] = $e->getMessage();
+    }
+    echo json_encode($response);
+    exit;
+}
+
+// --- REGULAR PAGE LOAD: Fetch pending requests for display ---
+$pending_requests = [];
+if ($conn) {
+    $sql = "SELECT req.id, req.request_type, req.expires_at, u.full_name as requester_name, ay.year_name as target_year
+            FROM system_change_requests req
+            JOIN users u ON req.requester_user_id = u.id
+            JOIN academic_years ay ON req.target_id = ay.id
+            WHERE req.status = 'pending'
+            ORDER BY req.created_at ASC";
+    $result = $conn->query($sql);
+    if($result) $pending_requests = $result->fetch_all(MYSQLI_ASSOC);
+}
 check_auth();
 ?>
 <!DOCTYPE html>
@@ -154,6 +223,35 @@ check_auth();
 
             <!-- Main Content -->
             <div class="container-fluid dashboard-content">
+                  <!-- ** NEW HT APPROVAL PANEL ** -->
+                  <?php if(!empty($pending_requests)): ?>
+                <div class="card border-primary shadow-lg mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <i class="fas fa-gavel me-2"></i>Action Required: System Change Requests
+                    </div>
+                    <div class="list-group list-group-flush">
+                        <?php foreach($pending_requests as $request): ?>
+                        <div class="list-group-item">
+                            <div class="row align-items-center">
+                                <div class="col-md-7">
+                                    <strong><?php echo htmlspecialchars($request['requester_name']); ?></strong> has requested to change the current academic year to "<strong><?php echo htmlspecialchars($request['target_year']); ?></strong>".
+                                    <small class="d-block text-muted">Auto-approves in: <?php echo date('d M Y H:i', strtotime($request['expires_at'])); ?></small>
+                                </div>
+                                <div class="col-md-5 text-md-end mt-2 mt-md-0">
+                                    <button class="btn btn-success btn-sm me-2" onclick="resolveRequest(<?php echo $request['id']; ?>, 'approve')">
+                                        <i class="fas fa-check"></i> Approve Now
+                                    </button>
+                                    <button class="btn btn-danger btn-sm" onclick="resolveRequest(<?php echo $request['id']; ?>, 'decline')">
+                                        <i class="fas fa-times"></i> Decline
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+
                 <!-- Overview Cards -->
                 <div class="row mb-4">
                     <div class="col-md-3">
@@ -303,6 +401,27 @@ check_auth();
     <!-- Bootstrap Bundle with Popper -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <!-- Custom JavaScript -->
-   <script src="javascript/script.js"></script>
+   <script src="javascript/script.js">
+      function resolveRequest(requestId, resolution) {
+            const actionText = resolution === 'approve' ? 'APPROVE' : 'DECLINE';
+            if (confirm(`Are you sure you want to ${actionText} this request? This action is immediate.`)) {
+                $.ajax({
+                    url: 'head_teacher_dashboard.php',
+                    type: 'POST',
+                    data: { action: 'resolve_request', request_id: requestId, resolution: resolution },
+                    dataType: 'json',
+                    success: function(response) {
+                        alert(response.message);
+                        if (response.success) {
+                            window.location.reload();
+                        }
+                    },
+                    error: function() {
+                        alert('An error occurred while processing the request.');
+                    }
+                });
+            }
+        }
+   </script>
 </body>
 </html>"

@@ -76,6 +76,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 } else {
                     $user_found_but_password_incorrect = true;
                 }
+            }
             $stmt_user->close();
         } else {
             // This is the critical error point for U1
@@ -122,7 +123,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $dashboard_map = [
                 'head_teacher' => 'head_teacher_dashboard.php',
                 'secretary' => 'secretary_dashboard.php',
-                'director_of_studies' => 'director_dashboard.php',
+                'director_of_studies' => 'Dos/director_dashboard.php',
                 'IT' => 'IT_dashboard.php',
                 'student' => 'student_dashboard.php',
                 'teacher' => 'teachers/teacher_dashboard.php',
